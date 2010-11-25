@@ -27,23 +27,42 @@ function bot_highlight_all_irc_msg_channel($data, $from_query = FALSE) {
     preg_match("/^ALL:\s+([a-zA-Z0-9\[\]\{\}\\\|\^\`\-\_\*]*)[:;,]?\s+(.*)$/i", $data->message, $matches)) {
       global $irc;
 
-      $users = $irc->_channels[$data->channel]->users;
+      // Assume the max message length is 300 characters.
+      $maxlength = 300;
       $t_args = array(
-        '!users' => '',
         '!from' => $data->nick,
         '!message' => $data->message,
       );
+      $message = t('!from said: !message', $t_args);
+      $message = strlen($message) > $maxlength ? '^^' : $message;
+
+      $users = $irc->_channels[$data->channel]->users;
+      $t_args = array(
+        '!users' => '',
+        '!message' => $message,
+      );
+      $t_message = '!users: !message';
       foreach ($users as $user) {
         if ($user->nick != $data->nick && $user->nick != variable_get('bot_nickname', 'bot_module')) {
-          $t_args['!users'] .= " {$user->nick}";
+          $addition = " {$user->nick}";
+          // If the message gets too long with this user added, send a message
+          // and clear out the users.
+          if (strlen(implode(': ', $t_args)) + strlen($addition) > $maxlength) {
+            bot_message($data->channel, t($t_message, $t_args));
+            $t_args['!users'] = '';
+          }
+          $t_args['!users'] .= $addition;
         }
       }
       if ($t_args['!users']) {
-        bot_message($data->channel, t('!users: !from said: !message', $t_args));
+        bot_message($data->channel, t($t_message, $t_args));
       }
   }
 }
 
+/**
+ * Helper function to pull out the default channels from bot_channels.
+ */
 function bot_highlight_all_default_channels() {
   $default_channels = array();
   $channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#test'));
