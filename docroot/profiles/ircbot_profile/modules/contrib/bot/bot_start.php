@@ -1,5 +1,5 @@
 <?php
-// $Id: bot_start.php,v 1.2.2.4.2.3 2008/06/23 01:39:28 morbus Exp $
+// $Id: bot_start.php,v 1.2.2.4.2.6 2010/05/10 12:41:24 morbus Exp $
 
 /*
  * @file
@@ -49,10 +49,10 @@ $bot = new drupal_wrapper(); // wrapper that integrates with Drupal hooks.
 $irc = new Net_SmartIRC(); // MmmmmmM. The IRC object itself. Magick happens here.
 $irc->setDebug( variable_get('bot_debugging', 0) ? SMARTIRC_DEBUG_ALL : SMARTIRC_DEBUG_NONE );
 // the (boolean) here is required, as Net_SmartIRC doesn't respect a FAPI checkbox value of 1, only TRUE.
-$irc->setAutoReconnect((boolean)variable_get('bot_auto_reconnect', 1)); // reconnect to the server if disconnected.
-$irc->setAutoRetry((boolean)variable_get('bot_auto_retry', 1)); // retry if a server connection fails.
+$irc->setAutoReconnect((boolean) variable_get('bot_auto_reconnect', 1)); // reconnect to the server if disconnected.
+$irc->setAutoRetry((boolean) variable_get('bot_auto_retry', 1)); // retry if a server connection fails.
+$irc->setUseSockets((boolean) variable_get('bot_real_sockets', 1)); // socket_connect or fsockopen?
 $irc->setChannelSyncing(TRUE); // keep a list of joined users per channel.
-$irc->setUseSockets(TRUE); // uses real sockets instead of fsock().
 
 // send every message type the library supports to our wrapper class.
 // we can automate the creation of these actionhandlers, but not the
@@ -69,20 +69,18 @@ foreach ($irc_message_types as $irc_message_type) {
   $irc->registerActionhandler(constant('SMARTIRC_TYPE_' . $irc_message_type), '.*', $bot, 'invoke_irc_msg_' . strtolower($irc_message_type));
 }
 
-// set up a five minute timer similar to Drupal's hook_cron(). this
-// is primarily used in the shipped code to clear cached data.
-$irc->registerTimehandler(300000, $bot, 'invoke_irc_bot_cron');
+// set up a timers similar to Drupal's hook_cron(), multiple types. I would have
+// liked to just pass a parameter to a single function, but SmartIRC can't do that.
+$irc->registerTimehandler(300000, $bot, 'invoke_irc_bot_cron');           // 5 minutes.
+$irc->registerTimehandler(60000, $bot,  'invoke_irc_bot_cron_faster');    // 1 minute.
+$irc->registerTimehandler(15000, $bot,  'invoke_irc_bot_cron_fastest');   // 15 seconds.
 
 // connect and begin listening.
 $irc->connect(variable_get('bot_server', 'irc.freenode.net'), variable_get('bot_server_port', 6667));
 $irc->login(variable_get('bot_nickname', 'bot_module'), variable_get('bot_nickname', 'bot_module') . ' :http://drupal.org/project/bot', 8, variable_get('bot_nickname', 'bot_module'), (variable_get('bot_password', '') != '') ? variable_get('bot_password', '') : NULL);
 
-// to support passwords, we have to make a single join per channel.
-$channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#test'));
-foreach ($channels as $channel) {
-  $channel_parts = explode(' ', $channel); // use a password if it's defined.
-  $irc->join($channel_parts[0], isset($channel_parts[1]) ? $channel_parts[1] : NULL);
-}
+// channel joining has moved to bot_irc_bot_cron_fastest().
+// read that function for the rationale, and what we gain from it.
 
 $irc->listen(); // go into the forever loop - no code after this is run.
 $irc->disconnect(); // if we stop listening, disconnect properly.
@@ -90,6 +88,8 @@ $irc->disconnect(); // if we stop listening, disconnect properly.
 // pass off IRC messages to our modules via Drupal's hook system.
 class drupal_wrapper {
   function invoke_irc_bot_cron(&$irc)                 { module_invoke_all('irc_bot_cron'); }
+  function invoke_irc_bot_cron_faster(&$irc)          { module_invoke_all('irc_bot_cron_faster'); }
+  function invoke_irc_bot_cron_fastest(&$irc)         { module_invoke_all('irc_bot_cron_fastest'); }
   function invoke_irc_msg_unknown(&$irc, &$data)      { module_invoke_all('irc_msg_unknown', $data); }
   function invoke_irc_msg_channel(&$irc, &$data)      { module_invoke_all('irc_msg_channel', $data); }
   function invoke_irc_msg_query(&$irc, &$data)        { module_invoke_all('irc_msg_query', $data); }
