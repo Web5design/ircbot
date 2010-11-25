@@ -27,8 +27,8 @@ function bot_highlight_all_irc_msg_channel($data, $from_query = FALSE) {
     preg_match("/^ALL:\s+([a-zA-Z0-9\[\]\{\}\\\|\^\`\-\_\*]*)[:;,]?\s+(.*)$/i", $data->message, $matches)) {
       global $irc;
 
-      // Assume the max message length is 300 characters.
-      $maxlength = 300;
+      // Assume the max message length is 460 characters.
+      $maxlength = 460;
       $t_args = array(
         '!from' => $data->nick,
         '!message' => $data->message,
