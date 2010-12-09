@@ -24,14 +24,14 @@ function bot_highlight_all_irc_msg_channel($data, $from_query = FALSE) {
   $channels = variable_get('bot_highlight_all_allowed_channels', bot_highlight_all_default_channels());
 
   if (in_array($data->channel, $channels) &&
-    preg_match("/^ALL:\s+([a-zA-Z0-9\[\]\{\}\\\|\^\`\-\_\*]*)[:;,]?\s+(.*)$/i", $data->message, $matches)) {
+    preg_match("/^ALL:\s+(.*)$/i", $data->message, $matches)) {
       global $irc;
 
       // Assume the max message length is 460 characters.
       $maxlength = 460;
       $t_args = array(
         '!from' => $data->nick,
-        '!message' => $data->message,
+        '!message' => $matches[1],
       );
       $message = t('!from said: !message', $t_args);
       $message = strlen($message) > $maxlength ? '^^' : $message;
