@@ -1,32 +1,40 @@
 <?php
-// $Id: bot.module,v 1.9.2.9.2.22 2010/11/16 18:27:14 morbus Exp $
+// $Id: bot.module,v 1.9.2.9.2.22.2.5 2010/12/29 21:36:21 morbus Exp $
 
 /**
  * @file
  * Enables a network and plugin framework for IRC bots.
  */
 
+define('BOT_STATUS_DISCONNECTED',  0);
+define('BOT_STATUS_CONNECTING',    1);
+define('BOT_STATUS_CONNECTED',     2);
+
 /**
- * Implementation of hook_help().
+ * Implements hook_help().
  */
 function bot_help($path, $arg) {
   switch ($path) {
     case 'bot':
-      return '<p>' . t('Listed here are the bot\'s enabled features and settings. Information about the bot\'s features is also available by asking it directly for "help", and then for more detail with "help &lt;feature&gt;" (such as "help Project URLs"). This would best be done in a private message, so as not to disrupt regular channel activity.') . '</p>';
+      return '<p>' . t('Listed here are the bot\'s enabled features and settings. Information about the bot\'s features is also available by asking it directly for "help", and then for more detail with "help &lt;feature&gt;" (such as "help Factoids"). This would best be done in a private message so as not to disrupt regular channel activity.') . '</p>';
     case 'admin/settings/bot':
       return '<p>' . t('Configure your bot framework with these settings.') . '</p>';
   }
 }
 
 /**
- * Implementation of hook_perm().
+ * Implements hook_permission().
  */
-function bot_perm() {
-  return array('administer bot');
+function bot_permission() {
+  return array(
+    'administer bot' => array(
+      'title' => t('Administer bot'),
+    ),
+  );
 }
 
 /**
- * Implementation of hook_menu().
+ * Implements hook_menu().
  */
 function bot_menu() {
   $items['bot'] = array(
@@ -35,12 +43,21 @@ function bot_menu() {
     'page callback'     => 'bot_overview',
     'title'             => 'Bot',
   );
-  $items['admin/settings/bot'] = array(
+  $items['admin/config/bot'] = array(
+    'access arguments'  => array('administer bot'),
+    'description'       => 'Configure your bot framework with these settings.',
+    'file'              => 'system.admin.inc',
+    'file path'         => drupal_get_path('module', 'system'),
+    'page callback'     => 'system_admin_menu_block_page',
+    'title'             => 'Bot',
+  );
+  $items['admin/config/bot/core'] = array(
     'access arguments'  => array('administer bot'),
     'description'       => 'Configure your bot framework with these settings.',
     'page callback'     => 'drupal_get_form',
     'page arguments'    => array('bot_settings'),
     'title'             => 'Bot',
+    'weight'            => -10,
   );
 
   return $items;
@@ -53,18 +70,18 @@ function bot_menu() {
  * verbatim (meaning URLs won't be linked, etc.). @todo Someday, urlfilter.
  */
 function bot_overview() {
-  $output = '<p>' . t('The bot connects to server %server as nick %name.', array('%server' => variable_get('bot_server', 'irc.freenode.net'), '%name' => variable_get('bot_nickname', 'bot_module'))) . '</p>';
-  $output .= '<ul id="bot_features">'; // witness this incredibly long line above this equally long, but mirthfully useless, comment! ha ha!
+  $build['bot_overview']['#markup']  = '<p>' . t('The bot connects to %server as %name.', array('%server' => variable_get('bot_server', 'irc.freenode.net'), '%name' => variable_get('bot_nickname', 'bot_module'))) . '</p>';
+  $build['bot_overview']['#markup'] .= '<ul id="bot-features">'; // witness this incredibly long line above this equally long, but mirthfully useless, comment! ha ha!
 
   $irc_features = array_filter(module_invoke_all('help', 'irc:features', NULL));
-  asort($irc_features); // alphabetical listing of all features. the machete is family.
-  foreach ($irc_features as $irc_feature) {
+  asort($irc_features); // alphabetical listing of features. the machete is family.
+  foreach ($irc_features as $irc_feature) { // unless you're thinking chainsaws. them too.
     $feature_help = array_filter(module_invoke_all('help', 'irc:features#' . preg_replace('/[^\w\d]/', '_', drupal_strtolower(trim($irc_feature))), NULL));
-    $output .= '<li><strong>' . check_plain($irc_feature) . ':</strong> ' . check_plain(array_shift($feature_help)) . '</li>';
+    $build['bot_overview']['#markup'] .= '<li><strong>' . check_plain($irc_feature) . ':</strong> ' . check_plain(array_shift($feature_help)) . '</li>';
   }
 
-  $output .= '</ul>';
-  return $output;
+  $build['bot_overview']['#markup'] .= '</ul>';
+  return $build;
 }
 
 /**
@@ -73,7 +90,7 @@ function bot_overview() {
 function bot_irc_bot_cron() {
   // recreates the variable cache.
   variable_set('bot_cache_cleared', time());
-  $GLOBALS['conf'] = variable_init();
+  $GLOBALS['conf'] = variable_initialize();
 
   // attempt to always be the nick configured...
   bot_name_check(); // ...in our settings.
@@ -93,7 +110,7 @@ function bot_irc_bot_cron_fastest() {
   global $irc;
 
   // to support passwords, we have to make a single join per channel.
-  $channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#test'));
+  $channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#botwar'));
 
   foreach ($channels as $channel) { // for every one we're configured to join...
     $channel_parts = explode(' ', $channel); // passwords are space-separated on list.
@@ -101,6 +118,13 @@ function bot_irc_bot_cron_fastest() {
       $irc->join($channel_parts[0], isset($channel_parts[1]) ? $channel_parts[1] : NULL);
       break; // we only join one channel per 15 seconds, to prevent overloading.
     }
+  }
+
+  // if a disconnect lock is NOT available, than that means we've been told
+  // to disconnect from someone or something (likely Drush). respect 'em.
+  if (!lock_may_be_available('bot_disconnect')) {
+    $irc->disconnect(); // let everyone know we're done.
+    variable_set('bot_status', BOT_STATUS_DISCONNECTED);
   }
 }
 
@@ -139,7 +163,7 @@ function bot_irc_msg_query($data) {
 }
 
 /**
- * Implementation of hook_irc_msg_nickchange().
+ * Implements hook_irc_msg_nickchange().
  *
  * If we've changed our nick (per bot_name_check()), we
  * should attempt to authenticate with a supplied password.
@@ -159,7 +183,7 @@ function bot_irc_msg_nickchange($data) {
 }
 
 /**
- * Implementation of hook_irc_msg_quit() {
+ * Implements hook_irc_msg_quit() {
  */
 function bot_irc_msg_quit($data) {
   $addressed = bot_name_regexp();
@@ -173,21 +197,21 @@ function bot_irc_msg_quit($data) {
 }
 
 /**
- * Implementation of hook_irc_msg_error() {
+ * Implements hook_irc_msg_error() {
  */
 function bot_irc_msg_error($data) {
   watchdog('bot', '@error', array('@error' => $data->rawmessage), WATCHDOG_ERROR);
 }
 
 /**
- * Implementation of hook_irc_msg_unknown() {
+ * Implements hook_irc_msg_unknown() {
  */
 function bot_irc_msg_unknown($data) {
-  watchdog('bot', '@unknown', array('@unknown' => $data->rawmessage));
+  watchdog('bot', '@unknown', array('@unknown' => $data->rawmessage), WATCHDOG_INFO);
 
   // if we're banned from a channel, remove it from joins.
   if ($data->rawmessageex[1] == SMARTIRC_ERR_BANNEDFROMCHAN) {
-    $channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#test'));
+    $channels = preg_split('/\s*,\s*/', variable_get('bot_channels', '#botwar'));
     foreach ($channels as $index => $channel) {
       if ($channel == $data->rawmessageex[3]) {
         unset($channels[$index]); // there's not a whole lot we can do at this point, so wave goodbye to the banners.
@@ -314,6 +338,16 @@ function bot_randomized_choice($substitutions, $possibilities) {
 
   $chosen = array_rand($possibilities);
   return strtr(trim($possibilities[$chosen]), $substitutions);
+}
+
+/**
+ * Retrieve the current bot status.
+ */
+function bot_status_get() {
+  // recreates the variable cache.
+  variable_set('bot_cache_cleared', time());
+  $GLOBALS['conf'] = variable_initialize();
+  return variable_get('bot_status');
 }
 
 /**

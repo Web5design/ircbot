@@ -3,4 +3,4 @@ name = Bot Highlight All
 description = Adds ability to highlight all members of a channel, for important announcements.
 dependencies[] = bot
 package = Bot
-core = 6.x
+core = 7.x

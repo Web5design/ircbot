@@ -1,5 +1,5 @@
 <?php
-// $Id: bot_potpourri.module,v 1.1.2.3 2010/05/12 13:45:50 morbus Exp $
+// $Id: bot_potpourri.module,v 1.1.2.3.2.1 2010/12/25 21:10:56 morbus Exp $
 
 /**
  * @file
@@ -7,7 +7,7 @@
  */
 
 /**
- * Implementation of hook_help().
+ * Implements hook_help().
  */
 function bot_potpourri_help($path, $arg) {
   switch ($path) {

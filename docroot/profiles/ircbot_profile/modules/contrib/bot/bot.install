@@ -1,8 +1,13 @@
 <?php
-// $Id: bot.install,v 1.1.2.1.2.1 2008/06/23 00:52:19 morbus Exp $
+// $Id: bot.install,v 1.1.2.1.2.1.2.2 2010/12/24 14:34:50 morbus Exp $
 
 /**
- * Implementation of hook_uninstall().
+ * @file
+ * Install, update, and uninstall functions for the Bot module.
+ */
+
+/**
+ * Implements hook_uninstall().
  */
 function bot_uninstall() {
   variable_del('bot_auto_retry');

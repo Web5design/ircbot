@@ -1,9 +1,10 @@
-; $Id: bot_seen.info,v 1.1.2.1.2.1.2.1 2010/12/27 16:01:13 morbus Exp $
-name = Bot Seen
+; $Id: bot_auth.info,v 1.1.2.1 2010/12/31 01:54:52 morbus Exp $
+name = Bot Auth
 package = Bot
 dependencies[] = bot
-description = "Enables users to find out the last time a channel member was active."
+description = "Authenticate to the bot with your Drupal user account."
 core = 7.x
+
 ; Information added by drupal.org packaging script on 2011-01-05
 version = "7.x-1.3"
 core = "7.x"
