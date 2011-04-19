@@ -1,123 +1,98 @@
 <?php
-// $Id: profiler_api.inc,v 1.1 2010/09/07 14:26:13 q0rban Exp $
 
 /**
- * @see hook_profile_modules().
+ * @see hook_install_tasks().
  *
  * @param $config
- *   The config array for an Install Profile.
+ *   The config array for a Profiler Install Profile.
  */
-function profiler_profile_modules($config) {
-  // Retrieve install profile dependencies.
-  $modules = isset($config['dependencies']) ? profiler_config_reduce($config['dependencies']) : array();
-
-  // Include code for building the module dependency tree.
-  require_once('profiler_module.inc');
-  $files = profiler_module_rebuild_cache();
-
-  // Always install required modules first. Respect the dependencies between
-  // the modules.
-  $required = array();
-  $non_required = array();
-  // Although the profile module is marked as required, it needs to go after
-  // every dependency, including non-required ones. So clear its required
-  // flag for now to allow it to install late.
-  // $files[$install_state['parameters']['profile']]->info['required'] = FALSE;
-  // Add modules that other modules depend on.
-  foreach ($modules as $module) {
-    if ($files[$module]->requires) {
-      $modules = array_merge($modules, array_keys($files[$module]->requires));
-    }
-  }
-  $modules = array_unique($modules);
-  foreach ($modules as $module) {
-    if (!empty($files[$module]->info['required'])) {
-      $required[$module] = $files[$module]->sort;
-    }
-    else {
-      $non_required[$module] = $files[$module]->sort;
-    }
-  }
-  arsort($required);
-  arsort($non_required);
-  return array_unique(array_keys(array_merge($required, $non_required)));
+function profiler_install_tasks($config) {
+  return array('profiler_install_profile_complete' => array());
 }
 
 /**
- * @see hook_profile_task_list().
+ * @see hook_install_tasks_alter().
  *
  * @param $config
- *   The config array for an Install Profile.
+ *   The config array for a Profiler Install Profile.
  */
-function profiler_profile_task_list($config) {
-  return array();
+function profiler_install_tasks_alter($config, &$tasks, $install_state) {
+  // Replace the modules profile task function with our custom callback.
+  $tasks['install_profile_modules']['function'] = 'profiler_install_profile_modules';
+}
+
+
+/**
+ * @see install_profile_modules().
+ *
+ * @param $install_state
+ *   An array of information about the current installation state.
+ *
+ * @return
+ *   The batch definition.
+ */
+function profiler_install_profile_modules(&$install_state) {
+  $profile_name = $install_state['parameters']['profile'];
+  $config = profiler_v2_load_config($profile_name);
+
+  // Only necessary to override dependencies if there is a base profile.
+  if (isset($config['base']) && $config['base']) {
+    // This is hacky to say the least, but this way Profiler can implement
+    // hook_system_info_alter() to add dependencies. If we don't do this, the
+    // dependency sorting will be incorrect and cause errors to display.
+    // First step, fill up the module_implements static cache.
+    module_implements('system_info_alter');
+    $implementations = &drupal_static('module_implements');
+    $implementations['system_info_alter']['profiler'] = FALSE;
+  }
+
+  return install_profile_modules($install_state);
 }
 
 /**
- * @see hook_profile_tasks().
- *
- * @param $config
- *   The config array for an Install Profile.
- * @param $task
- *   The current $task of the install system. When hook_profile_tasks() is first
- *   called, this is 'profile'.
- * @param $url
- *   Complete URL to be used for a link or form action on a custom page, if
- *   providing any, to allow the user to proceed with the installation.
+ * Helper to hook_form_install_configure_form_alter().
  */
-function profiler_profile_tasks($config, &$task, $url) {
-  if ($task == 'profile') {
-    // Disable all DB blocks
-    db_query("UPDATE {blocks} SET status = 0, region = ''");
+function profiler_form_install_configure_form_alter($config, &$form, &$form_state) {
+  $form['site_information']['site_name']['#default_value'] = $_SERVER['SERVER_NAME'];
+}
 
-    // Run any component installations
-    profiler_install_components($config);
+/**
+ * Implements hook_system_info_alter().
+ */
+function profiler_system_info_alter(&$info, $file, $type) {
+  if ($file->name == drupal_get_profile() && isset($info['base'])) {
+    $config = profiler_v2_load_config($file->name);
+    $config['dependencies'] = profiler_config_reduce($config['dependencies']);
+    $info = $config;
+  }
+}
 
-    // Run hook_install() for the install profile.
-    global $profile;
-    $function = "{$profile}_install";
-    $file = "./profiles/{$profile}/{$profile}.install";
-    if (file_exists($file)) {
-      require_once($file);
-    }
-    if (function_exists($function)) {
-      call_user_func($function);
-    }
+/**
+ * Complete the Profile installation.
+ * @param $install_state 
+ *   An array of information about the current installation state.
+ */
+function profiler_install_profile_complete(&$install_state) {
+  $profile_name = $install_state['parameters']['profile'];
+  $config = profiler_v2_load_config($profile_name);
 
-    // Rebuild key tables/caches
-    menu_rebuild();
-    module_rebuild_cache(); // Detects the newly added bootstrap modules
+  // Disable all DB blocks
+  db_query("UPDATE {block} SET status = 0, region = ''");
+
+  // We flush caches at the beginning to ensure that any necessary module
+  // tasks, such as Features component rebuilding, is complete before the
+  // remaining tasks are run.
+  drupal_flush_all_caches();
+
+  // Run any component installations
+  profiler_install_components($config);
+
+  // Rebuild key tables/caches
+  menu_rebuild();
+  if (isset($config['node'])) {
     node_access_rebuild();
-    drupal_get_schema('system', TRUE); // Clear schema DB cache
-    drupal_flush_all_caches();
-
-    // Finish
-    profiler_install_configure($config);
-    $task = 'profile-finished';
   }
-  return '';
-}
-
-/**
- * Helper to implementation of hook_form_alter() for Install profiles.
- *
- * Allows the profile to alter the site-configuration form. This is
- * called through custom invocation, so $form_state is not populated.
- *
- * @param $config
- *   The config array for an Install Profile.
- */
-function profiler_form_alter($config, &$form, $form_state, $form_id) {
-  // If site_name and site_mail are in the config, we can possibly bypass a step
-  // during the installation.
-  if ($form_id == 'install_configure' &&
-    isset($config['variables']['site_name']) &&
-    isset($config['variables']['site_mail']) &&
-    profiler_config_load_superuser($config)
-  ) {
-    variable_set('site_name', $config['variables']['site_name']);
-    variable_set('site_mail', $config['variables']['site_mail']);
-  }
+  drupal_flush_all_caches();
 }
 
 /**
@@ -131,6 +106,9 @@ function profiler_form_alter($config, &$form, $form_state, $form_id) {
  *   array('bar');
  */
 function profiler_config_reduce($data) {
+  // We want the string keys at the end of the array, so that they can determine
+  // the final setting.
+  krsort($data);
   $reduced = array();
   foreach ($data as $key => $value) {
     if (is_int($key)) {
@@ -201,31 +179,6 @@ function profiler_install_components($config) {
 }
 
 /**
- * This function mimics a lot of the functionality of install_configure_form_submit() inside install.php
- */
-function profiler_install_configure($config) {
-  if ($array = profiler_config_load_superuser($config)) {
-    // We need to mimic being user 1 in order to bypass administeruserbyrole.
-    global $user;
-    $user->uid = 1;
-
-    // Save user 1
-    profiler_install_users(array($array));
-    user_authenticate($array);
-
-    // The user is now logged in, but has no session ID yet, which
-    // would be required later in the request, so remember it.
-    $user->sid = session_id();
-
-    // Force clean URLs... (why?)
-    variable_set('clean_url', TRUE);
-
-    // Record when this install ran.
-    variable_set('install_time', time());
-  }
-}
-
-/**
  * Invoke module hooks to retrieve component info.
  */
 function profiler_components() {
@@ -251,6 +204,18 @@ function system_profiler_components() {
   return array(
     'theme' => array('callback' => 'profiler_install_theme'),
     'variables' => array('callback' => 'profiler_install_variables'),
+  );
+}
+
+/**
+ * Implementation of hook_profiler_components() on behalf of filter.
+ */
+function filter_profiler_components() {
+  return array(
+    'input-formats' => array(
+      'callback' => 'profiler_install_input_formats',
+      'weight' => 0,
+    )
   );
 }
 
@@ -293,15 +258,8 @@ function user_profiler_components() {
 /**
  * Component install callback for 'theme'.
  */
-function profiler_install_theme($key, $config, &$identifiers) {
-  system_theme_data();
-  variable_set('theme_default', $key);
-  list_themes(TRUE);
-  system_initialize_theme_blocks($key);
-  db_query("UPDATE {system} SET status = 1 WHERE type = 'theme' and name = '%s'", $key);
-  list_themes(TRUE);
-  menu_rebuild();
-  drupal_rebuild_theme_registry();
+function profiler_install_theme($theme_name, $config, &$identifiers) {
+  variable_set('theme_default', $theme_name);
 }
 
 /**
@@ -309,7 +267,37 @@ function profiler_install_theme($key, $config, &$identifiers) {
  */
 function profiler_install_variables($vars, $config, &$identifiers) {
   foreach($vars as $key => $value) {
+    // Handle custom keys.
+    if ($key == 'user_admin_role' && $rid = _profiler_role_id_from_name($value)) {
+      $value = $rid;
+    }
     variable_set($key, $value);
+  }
+}
+
+/**
+ * Component install callback for 'input-formats'.
+ */
+function profiler_install_input_formats($formats, $config, &$identifiers) {
+  foreach ($formats as $format_name => $array) {
+    // If the format name is not declared, use the array key.
+    if (!isset($array['format'])) {
+      $array['format'] = $format_name;
+    }
+    $format = (object) $array;
+    if (filter_format_save($format)) {
+      $identifiers['input-formats'][$format_name] = $format;
+    }
+    if (isset($array['roles'])) {
+      $roles = profiler_config_reduce($array['roles']);
+      // Enable permissions for these roles.
+      $permission = filter_permission_name($format);
+      foreach ($roles as $role_name) {
+        if ($rid = _profiler_role_id_from_name($role_name)) {
+          user_role_grant_permissions($rid, array($permission));
+        }
+      }
+    }
   }
 }
 
@@ -372,31 +360,38 @@ function profiler_install_terms($terms, $config, &$identifiers) {
  */
 function profiler_install_users($users) {
   foreach (array_filter($users) as $array) {
-    // For some reason db_last_insert_id() doesn't get the uid of the newly created
-    // user, so we need to separate out roles first, create the account, then save
-    // again to properly assign roles to this user.
-    $roles = isset($array['roles']) ? $array['roles'] : array();
-    unset($array['roles']);
-
-    // Use random password.
-    $array['pass'] = user_password();
-
-    // Load and update the account or create a new one.
-    $account = isset($array['uid']) ? user_load($array['uid']) : user_load(array('name' => $array['name']));
-    $account = $account ? $account : new stdClass();
-    user_save($account, $array);
-
-    // Load the saved account.
-    $account = user_load(array('name' => $array['name']));
-
+    $roles = isset($array['roles']) ? $array['roles'] : '';
     // Set the roles.
-    $formatted = array();
+    $array['roles'] = array();
     $roles = explode(',', $roles);
     foreach ($roles as $name) {
-      if ($rid = db_result(db_query("SELECT rid FROM {role} WHERE name = '%s'", trim($name)))) {
-        $formatted[$rid] = TRUE;
+      if ($rid = _profiler_role_id_from_name($name)) {
+        $array['roles'][$rid] = $name;
       }
     }
-    user_save($account, array('roles' => $formatted));
+
+    // Use random password.
+    $array['pass'] = empty($array['pass']) ? user_password() : $array['pass'];
+
+    // Load and update the account or create a new one.
+    $account = isset($array['uid']) ? user_load($array['uid']) : user_load_by_name($array['name']);
+    $account = $account ? $account : new stdClass();
+    $account = user_save($account, $array);
   }
+}
+
+/**
+ * Helper function to select a role id based on role name.
+ */
+function _profiler_role_id_from_name($role_name) {
+  $rids = &drupal_static(__FUNCTION__);
+
+  if (!isset($rids[$role_name])) {
+    $query = db_select('role', 'r')
+                ->fields('r', array('rid'))
+                ->condition('r.name', $role_name);
+    $rids[$role_name] = $query->execute()->fetchField();
+  }
+
+  return $rids[$role_name];
 }

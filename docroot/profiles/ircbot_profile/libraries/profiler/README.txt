@@ -1,4 +1,3 @@
-# $Id: README.txt,v 1.6 2010/09/10 16:59:41 q0rban Exp $
 
 Profiler
 --------
