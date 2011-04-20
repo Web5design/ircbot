@@ -1,7 +1,0 @@
-name = IRC Bot
-description = Sets up a simple website to create a IRC bot.
-theme = cube
-dependencies[] = bot
-dependencies[] = admin
-
-variables[site_frontpage] = bot

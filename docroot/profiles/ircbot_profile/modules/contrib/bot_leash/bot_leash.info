@@ -1,6 +1,0 @@
-name = Bot Leash
-description = "Keeps the bot from talking to strangers (users who are not in an IRC channel the bot itself is already on)."
-package = Bot
-dependencies[] = bot
-php = 5.2
-core = 7.x
