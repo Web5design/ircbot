@@ -1,10 +1,7 @@
 core = 7.x
 api = 2
 
-projects[drupal][version] = "7.0"
-; Since this project has no node types, upgrades will require this patch.
-; See http://drupal.org/node/1017672 & http://drupal.org/node/1133402
-projects[drupal][patch][] = http://drupal.org/files/issues/node_types_D7.patch
+projects[drupal][version] = "7.10"
 
 projects[ircbot_profile][type] = "profile"
 projects[ircbot_profile][download][type] = git
